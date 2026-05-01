@@ -95,22 +95,28 @@ M.file_format_modifiers = {
 	["TCNUM"] = "",
 
 	-- $(FNPATH): compiled binary path; uses sha256 hash to avoid non-ASCII characters in paths
-	["FNPATH"] = function(filepath)
-		local safe_name = string.sub(vim.fn.sha256(filepath), 1, 12)
-		local bufnr = vim.fn.bufnr(filepath)
-		if bufnr ~= -1 then
-			local ok, config = pcall(require, "competitest.config")
-			if ok then
-				local buf_cfg = config.get_buffer_config(bufnr)
-				if buf_cfg.use_temporary_directory then
-					local tmpdir = vim.fn.fnamemodify(vim.fn.tempname(), ":h") .. "/competitest/"
-					vim.fn.mkdir(tmpdir, "p")
-					return tmpdir .. safe_name
+	-- Temp directory is cached per filepath so compile and run get the same path
+	["FNPATH"] = (function()
+		local tmpdir_cache = {}
+		return function(filepath)
+			local safe_name = string.sub(vim.fn.sha256(filepath), 1, 12)
+			local bufnr = vim.fn.bufnr(filepath)
+			if bufnr ~= -1 then
+				local ok, config = pcall(require, "competitest.config")
+				if ok then
+					local buf_cfg = config.get_buffer_config(bufnr)
+					if buf_cfg.use_temporary_directory then
+						if not tmpdir_cache[filepath] then
+							tmpdir_cache[filepath] = vim.fn.fnamemodify(vim.fn.tempname(), ":h") .. "/competitest/"
+							vim.fn.mkdir(tmpdir_cache[filepath], "p")
+						end
+						return tmpdir_cache[filepath] .. safe_name
+					end
 				end
 			end
+			return safe_name
 		end
-		return safe_name
-	end,
+	end)(),
 }
 
 ---Convert a string with CompetiTest file-format modifiers into a formatted string
