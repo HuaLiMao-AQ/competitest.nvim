@@ -39,7 +39,6 @@ function M.find_problem_url(bufnr)
 	-- 2. Check for @url metadata comment in the source file (single-file / cph-ng style)
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	for _, line in ipairs(lines) do
-		-- Match patterns like: // @url https://codeforces.com/... or # @url https://...
 		local url = line:match("@url%s+(https?://%S+)")
 		if url then
 			return url
@@ -49,56 +48,36 @@ function M.find_problem_url(bufnr)
 	return nil
 end
 
----Submit a solution to the cph-ng router via Socket.IO
+---Submit a solution to the cph-ng router via Socket.IO (async)
 ---@param opts { url: string, source_code: string, port?: integer }
----@return boolean success whether the submission was accepted
----@return string? error error message on failure
-function M.submit(opts)
+---@param callback fun(success: boolean, err?: string)
+function M.submit(opts, callback)
 	local SocketIO = require("competitest.socketio")
 	local port = opts.port or DEFAULT_PORT
-
 	local client = SocketIO.new({ port = port })
 
-	local err = client:connect()
-	if err then
-		client:close()
-		return false, "failed to connect to cph-ng router on port " .. port .. ": " .. err
-	end
-
-	-- Emit submit event
-	err = client:emit("submit", {
-		url = opts.url,
-		sourceCode = opts.source_code,
-	})
-	if err then
-		client:close()
-		return false, "failed to emit submit event: " .. err
-	end
-
-	-- Wait for the server's acknowledgement
-	-- cph-ng may respond with either "submitDone" or "submitResult"
-	local data, wait_err = client:wait_for("submitDone", 15000)
-	if wait_err then
-		-- Try alternate event name
-		data, wait_err = client:wait_for("submitResult", 15000)
-		if wait_err then
+	client:connect(function(err)
+		if err then
 			client:close()
-			return false, "timed out waiting for submission response: " .. wait_err
+			callback(false, "failed to connect to router on port " .. port .. ": " .. err)
+			return
 		end
-	end
 
-	client:close()
-
-	-- Check response for errors
-	if data and type(data) == "table" and data.error then
-		return false, "submission rejected: " .. tostring(data.error)
-	end
-
-	return true, nil
+		client:emit("submit", {
+			url = opts.url,
+			sourceCode = opts.source_code,
+		}, function(emit_err)
+			client:close()
+			if emit_err then
+				callback(false, "failed to emit submit: " .. emit_err)
+			else
+				callback(true)
+			end
+		end)
+	end)
 end
 
----Handle the `:CompetiTest submit` command
----Reads the current buffer, resolves the problem URL, and submits via cph-ng
+---Handle the `:CompetiTest submit` command (async, non-blocking)
 function M.submit_current_buffer()
 	local bufnr = vim.api.nvim_get_current_buf()
 	config.load_buffer_config(bufnr)
@@ -112,6 +91,28 @@ function M.submit_current_buffer()
 	local bufcfg = config.get_buffer_config(bufnr)
 	local port = bufcfg.cph_ng_port or DEFAULT_PORT
 
+	-- Read source code from buffer lines
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	local source_code = table.concat(lines, "\n")
+
+	utils.notify("submitting to " .. url .. " ...", "INFO")
+
+	local function do_submit()
+		M.submit({
+			url = url,
+			source_code = source_code,
+			port = port,
+		}, function(success, err)
+			vim.schedule(function()
+				if success then
+					utils.notify("solution submitted successfully!", "INFO")
+				else
+					utils.notify("submit failed: " .. (err or "unknown error"))
+				end
+			end)
+		end)
+	end
+
 	-- Auto-start router if configured
 	if bufcfg.cph_ng_auto_start_router ~= false then
 		local router = require("competitest.router")
@@ -120,33 +121,10 @@ function M.submit_current_buffer()
 			utils.notify("submit: " .. router_err)
 			return
 		end
-	end
-
-	-- Read source code from buffer lines
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local source_code = table.concat(lines, "\n")
-
-	utils.notify("submitting to " .. url .. " ...", "INFO")
-
-	-- Brief wait for router to bind to port if just started
-	if bufcfg.cph_ng_auto_start_router ~= false then
-		local luv = vim.uv and vim.uv or vim.loop
-		local wait_until = luv.now() + 500
-		while luv.now() < wait_until do
-			luv.run("once")
-		end
-	end
-
-	local success, err = M.submit({
-		url = url,
-		source_code = source_code,
-		port = port,
-	})
-
-	if success then
-		utils.notify("solution submitted successfully!", "INFO")
+		-- Wait for router to bind to port, then submit
+		vim.defer_fn(do_submit, 500)
 	else
-		utils.notify("submit failed: " .. (err or "unknown error"))
+		do_submit()
 	end
 end
 
