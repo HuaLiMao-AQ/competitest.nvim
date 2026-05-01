@@ -402,6 +402,21 @@ function storage_utils.store_testcases(bufnr, tclist, use_single_file, replace, 
 	end
 end
 
+---Store problem metadata including URL for later submission
+---@param tc_dir string testcases directory path
+---@param task competitest.CCTask received task
+function storage_utils.store_problem_metadata(tc_dir, task)
+	local problem_meta = {
+		url = task.url,
+		name = task.name,
+		group = task.group,
+		received_at = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+	}
+	local json_content = vim.json.encode(problem_meta)
+	local metadata_path = tc_dir .. "/.problem.json"
+	utils.write_string_on_file(metadata_path, json_content)
+end
+
 ---Utility function to store received task and its testcases following configuration
 ---@param filepath string source file absolute path
 ---@param confirm_overwriting boolean whether to ask user to overwrite an already existing file or not
@@ -467,6 +482,8 @@ function storage_utils.store_received_task_config(filepath, confirm_overwriting,
 		evaluated_dir = cfg.testcases_directory
 	end
 	local tcdir = file_directory .. "/" .. evaluated_dir .. "/"
+	-- Store problem metadata for cph-ng submit integration
+	storage_utils.store_problem_metadata(tcdir, task)
 	if cfg.testcases_use_single_file then
 		local single_file_path = tcdir .. utils.eval_string(filepath, cfg.testcases_single_file_format)
 		testcases.single_file.write(single_file_path, tctbl)
