@@ -94,9 +94,9 @@ M.file_format_modifiers = {
 	-- $(TCNUM): testcase number; it will be set later
 	["TCNUM"] = "",
 
-	-- $(FNPATH): compiled binary path; resolves to a temporary directory or current directory based on `use_temporary_directory`
+	-- $(FNPATH): compiled binary path; uses sha256 hash to avoid non-ASCII characters in paths
 	["FNPATH"] = function(filepath)
-		local fname = vim.fn.fnamemodify(filepath, ":t:r")
+		local safe_name = string.sub(vim.fn.sha256(filepath), 1, 12)
 		local bufnr = vim.fn.bufnr(filepath)
 		if bufnr ~= -1 then
 			local ok, config = pcall(require, "competitest.config")
@@ -105,11 +105,11 @@ M.file_format_modifiers = {
 				if buf_cfg.use_temporary_directory then
 					local tmpdir = vim.fn.fnamemodify(vim.fn.tempname(), ":h") .. "/competitest/"
 					vim.fn.mkdir(tmpdir, "p")
-					return tmpdir .. fname
+					return tmpdir .. safe_name
 				end
 			end
 		end
-		return fname
+		return safe_name
 	end,
 }
 
