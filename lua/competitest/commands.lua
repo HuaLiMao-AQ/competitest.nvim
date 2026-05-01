@@ -77,6 +77,11 @@ function M.command(arguments)
 				M.receive(args[2])
 			end
 		end,
+		submit = function()
+			if check_subargs(0, 0) then
+				require("competitest.submit").submit_current_buffer()
+			end
+		end,
 	}
 
 	local sub = subcommands[args[1]]
