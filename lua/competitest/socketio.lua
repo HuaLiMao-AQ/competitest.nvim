@@ -21,7 +21,7 @@ function Client.new(opts)
 	opts = opts or {}
 	---@type competitest.SocketIOClient
 	local self = {
-		host = opts.host or "localhost",
+		host = opts.host or "127.0.0.1",
 		port = opts.port or 27121,
 		path = opts.path or "/ws",
 		sid = nil,
