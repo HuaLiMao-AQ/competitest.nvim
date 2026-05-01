@@ -289,19 +289,20 @@ require('competitest').setup {
 	save_all_files = false,
 	compile_directory = ".",
 	compile_command = {
-		c = { exec = "gcc", args = { "-Wall", "$(FNAME)", "-o", "$(FNOEXT)" } },
-		cpp = { exec = "g++", args = { "-Wall", "$(FNAME)", "-o", "$(FNOEXT)" } },
+		c = { exec = "gcc", args = { "-Wall", "$(FNAME)", "-o", "$(FNPATH)" } },
+		cpp = { exec = "g++", args = { "-Wall", "$(FNAME)", "-o", "$(FNPATH)" } },
 		rust = { exec = "rustc", args = { "$(FNAME)" } },
 		java = { exec = "javac", args = { "$(FNAME)" } },
 	},
 	running_directory = ".",
 	run_command = {
-		c = { exec = "./$(FNOEXT)" },
-		cpp = { exec = "./$(FNOEXT)" },
-		rust = { exec = "./$(FNOEXT)" },
+		c = { exec = "$(FNPATH)" },
+		cpp = { exec = "$(FNPATH)" },
+		rust = { exec = "$(FNPATH)" },
 		python = { exec = "python", args = { "$(FNAME)" } },
 		java = { exec = "java", args = { "$(FNOEXT)" } },
 	},
+	use_temporary_directory = true,
 	multiple_testing = -1,
 	maximum_time = 5000,
 	output_compare_method = "squish",
@@ -389,6 +390,7 @@ require('competitest').setup {
 - `compile_command`: configure the command used to compile code for every different language, see [here](#customize-compile-and-run-commands)
 - `running_directory`: execution directory of your solutions, relatively to current file's path
 - `run_command`: configure the command used to run your solutions for every different language, see [here](#customize-compile-and-run-commands)
+- `use_temporary_directory`: if true compiled binaries are stored in a temporary directory (e.g. `/tmp/.../competitest/`), keeping the source directory clean; if false they are stored in the current file's directory
 - `multiple_testing`: how many testcases to run at the same time
 	- set it to `-1` to make the most of the amount of available parallelism. Often the number of testcases run at the same time coincides with the number of CPUs
 	- set it to `0` if you want to run all the testcases together
@@ -491,6 +493,7 @@ You can use them to [define commands](#customize-compile-and-run-commands) or to
 | `$(FABSPATH)` | absolute path of current file              |
 | `$(ABSDIR)`   | absolute path of folder that contains file |
 | `$(TCNUM)`    | testcase number                            |
+| `$(FNPATH)`   | compiled binary path, resolves to a temporary directory or current directory based on `use_temporary_directory` |
 
 #### Receive modifiers
 You can use them to customize the options `received_problems_path`, `received_contests_directory`, `received_contests_problems_path` and to [insert problem details inside template files](#templates-for-received-problems-and-contests). See also [tips for customizing folder structure for received problems and contests](#customize-folder-structure).
@@ -520,11 +523,11 @@ Of course you can customize commands used for compiling and for running your pro
 ``` lua
 require('competitest').setup {
 	compile_command = {
-		cpp       = { exec = 'g++',           args = {'$(FNAME)', '-o', '$(FNOEXT)'} },
+		cpp       = { exec = 'g++',           args = {'$(FNAME)', '-o', '$(FNPATH)'} },
 		some_lang = { exec = 'some_compiler', args = {'$(FNAME)'} },
 	},
 	run_command = {
-		cpp       = { exec = './$(FNOEXT)' },
+		cpp       = { exec = '$(FNPATH)' },
 		some_lang = { exec = 'some_interpreter', args = {'$(FNAME)'} },
 	},
 }

@@ -68,6 +68,7 @@
 ---@field compile_command { [string]: competitest.SystemCommand } command used to compile code, for each file type
 ---@field running_directory string working directory of your solutions, relative to current file path
 ---@field run_command { [string]: competitest.SystemCommand } command used to run your solutions, for each file type
+---@field use_temporary_directory boolean if true compiled binaries are stored in a temporary directory, otherwise in the current file's directory
 ---@field multiple_testing -1 | 0 | integer how many testcases to run at the same time: `0` to run all them together, `-1` to use the amount of available parallelism, or any positive number to run that number of testcases
 ---@field maximum_time integer maximum execution time (in milliseconds) given to a process: any process exceeding it will be killed
 ---@field output_compare_method competitest.Compare.builtin_method | competitest.Compare.method how output (stdout) and expected output should be compared: `"exact"` for character-by-character comparison, `"squish"` to compare stripping duplicated or extra white spaces and newlines, custom function accepting strings `output`, `expected_output` and returning `true` if and only if `output` is correct
@@ -202,19 +203,20 @@ local default_config = {
 	save_all_files = false,
 	compile_directory = ".",
 	compile_command = {
-		c = { exec = "gcc", args = { "-Wall", "$(FNAME)", "-o", "$(FNOEXT)" } },
-		cpp = { exec = "g++", args = { "-Wall", "$(FNAME)", "-o", "$(FNOEXT)" } },
+		c = { exec = "gcc", args = { "-Wall", "$(FNAME)", "-o", "$(FNPATH)" } },
+		cpp = { exec = "g++", args = { "-Wall", "$(FNAME)", "-o", "$(FNPATH)" } },
 		rust = { exec = "rustc", args = { "$(FNAME)" } },
 		java = { exec = "javac", args = { "$(FNAME)" } },
 	},
 	running_directory = ".",
 	run_command = {
-		c = { exec = "./$(FNOEXT)" },
-		cpp = { exec = "./$(FNOEXT)" },
-		rust = { exec = "./$(FNOEXT)" },
+		c = { exec = "$(FNPATH)" },
+		cpp = { exec = "$(FNPATH)" },
+		rust = { exec = "$(FNPATH)" },
 		python = { exec = "python", args = { "$(FNAME)" } },
 		java = { exec = "java", args = { "$(FNOEXT)" } },
 	},
+	use_temporary_directory = true,
 	multiple_testing = -1,
 	maximum_time = 5000,
 	output_compare_method = "squish",

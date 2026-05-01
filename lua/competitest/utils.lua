@@ -93,6 +93,24 @@ M.file_format_modifiers = {
 
 	-- $(TCNUM): testcase number; it will be set later
 	["TCNUM"] = "",
+
+	-- $(FNPATH): compiled binary path; resolves to a temporary directory or current directory based on `use_temporary_directory`
+	["FNPATH"] = function(filepath)
+		local fname = vim.fn.fnamemodify(filepath, ":t:r")
+		local bufnr = vim.fn.bufnr(filepath)
+		if bufnr ~= -1 then
+			local ok, config = pcall(require, "competitest.config")
+			if ok then
+				local buf_cfg = config.get_buffer_config(bufnr)
+				if buf_cfg.use_temporary_directory then
+					local tmpdir = vim.fn.fnamemodify(vim.fn.tempname(), ":h") .. "/competitest/"
+					vim.fn.mkdir(tmpdir, "p")
+					return tmpdir .. fname
+				end
+			end
+		end
+		return fname
+	end,
 }
 
 ---Convert a string with CompetiTest file-format modifiers into a formatted string
