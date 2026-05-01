@@ -82,6 +82,24 @@ function M.command(arguments)
 				require("competitest.submit").submit_current_buffer()
 			end
 		end,
+		start_router = function()
+			if check_subargs(0, 1) then
+				local port = tonumber(args[2]) or 27121
+				local router = require("competitest.router")
+				local err = router.start(port)
+				if err then
+					utils.notify("start_router: " .. err)
+				else
+					utils.notify("router started on port " .. port, "INFO")
+				end
+			end
+		end,
+		stop_router = function()
+			if check_subargs(0, 0) then
+				require("competitest.router").stop()
+				utils.notify("router stopped", "INFO")
+			end
+		end,
 	}
 
 	local sub = subcommands[args[1]]

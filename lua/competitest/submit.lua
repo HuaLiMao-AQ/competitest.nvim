@@ -109,17 +109,38 @@ function M.submit_current_buffer()
 		return
 	end
 
+	local bufcfg = config.get_buffer_config(bufnr)
+	local port = bufcfg.cph_ng_port or DEFAULT_PORT
+
+	-- Auto-start router if configured
+	if bufcfg.cph_ng_auto_start_router ~= false then
+		local router = require("competitest.router")
+		local router_err = router.start(port)
+		if router_err then
+			utils.notify("submit: " .. router_err)
+			return
+		end
+	end
+
 	-- Read source code from buffer lines
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	local source_code = table.concat(lines, "\n")
 
 	utils.notify("submitting to " .. url .. " ...", "INFO")
 
-	local bufcfg = config.get_buffer_config(bufnr)
+	-- Brief wait for router to bind to port if just started
+	if bufcfg.cph_ng_auto_start_router ~= false then
+		local luv = vim.uv and vim.uv or vim.loop
+		local wait_until = luv.now() + 500
+		while luv.now() < wait_until do
+			luv.run("once")
+		end
+	end
+
 	local success, err = M.submit({
 		url = url,
 		source_code = source_code,
-		port = bufcfg.cph_ng_port,
+		port = port,
 	})
 
 	if success then

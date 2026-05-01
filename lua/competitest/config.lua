@@ -81,6 +81,8 @@
 ---@field testcases_directory string where testcases files are located, relative to current file path
 ---@field companion_port integer competitive-companion port
 ---@field cph_ng_port integer? cph-ng router port for code submission (default: 27121)
+---@field cph_ng_router_path string? custom path to the router binary (overrides auto-download)
+---@field cph_ng_auto_start_router boolean auto-start router on submit (default: true)
 ---@field receive_print_message boolean notify user that CompetiTest is ready to receive testcases, problems, contests or that they have just been received
 ---@field start_receiving_persistently_on_setup boolean start receiving testcases, problems and contests persistently, soon after calling `setup()`
 ---@field template_file false | string | table<string, string> templates used when creating source files for received problems or contests: `false` to not use templates, string with CompetiTest file-format modifiers or table associating file extension to template file path
@@ -232,6 +234,8 @@ local default_config = {
 
 	companion_port = 27121,
 	cph_ng_port = 27121,
+	cph_ng_router_path = nil,
+	cph_ng_auto_start_router = true,
 	receive_print_message = true,
 	start_receiving_persistently_on_setup = false,
 	template_file = false,

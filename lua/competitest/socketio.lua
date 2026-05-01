@@ -1,6 +1,8 @@
+local luv = vim.uv and vim.uv or vim.loop
+
 ---@class (exact) competitest.SocketIOClient
----@field host string hostname or IP of the cph-ng router
----@field port integer port of the cph-ng router
+---@field host string hostname or IP of the router
+---@field port integer port of the router
 ---@field path string Socket.IO path (e.g. "/ws")
 ---@field sid string? session ID received during handshake
 ---@field ping_interval integer interval in ms between server pings
@@ -34,11 +36,15 @@ function Client.new(opts)
 	return self
 end
 
----Build the base polling URL for Engine.IO
+---Build the polling path with query parameters
 ---@private
 ---@return string
-function Client:_polling_url()
-	return string.format("http://%s:%d%s/?EIO=4&transport=polling&type=vscode", self.host, self.port, self.path)
+function Client:_poll_path()
+	local params = "EIO=4&transport=polling&type=vscode"
+	if self.sid then
+		params = params .. "&sid=" .. self.sid
+	end
+	return self.path .. "/?" .. params
 end
 
 ---Perform the Socket.IO handshake via HTTP polling
@@ -48,8 +54,7 @@ function Client:connect()
 		return nil
 	end
 
-	local url = self:_polling_url()
-	local body, headers, err = self:_http_get(url, 5000)
+	local body, headers, err = self:_http_get(self:_poll_path(), 5000)
 	if err then
 		return "connect handshake GET failed: " .. err
 	end
@@ -89,15 +94,14 @@ function Client:connect()
 	self:_send_raw("40")
 
 	-- Wait for the server's CONNECT acknowledgement ("40" or "40{...}")
-	local deadline = vim.uv.now() + 5000
-	while vim.uv.now() < deadline do
-		local remaining = deadline - vim.uv.now()
+	local deadline = luv.now() + 5000
+	while luv.now() < deadline do
+		local remaining = deadline - luv.now()
 		if remaining <= 0 then
 			break
 		end
 		local poll_timeout = math.min(remaining, 1000)
-		local poll_url = self:_polling_url()
-		local poll_body, _, poll_err = self:_http_get(poll_url, poll_timeout)
+		local poll_body, _, poll_err = self:_http_get(self:_poll_path(), poll_timeout)
 		if poll_err then
 			self.connected = false
 			return "connect: failed waiting for CONNECT acknowledgement: " .. poll_err
@@ -105,14 +109,9 @@ function Client:connect()
 		if poll_body and poll_body ~= "" then
 			self:_parse_packets(poll_body)
 		end
-		-- A successful CONNECT response from the server starts with "40"
-		-- (Engine.IO MESSAGE + Socket.IO CONNECT). Once received we are fully connected.
-		-- The _handle_packet already stores it; check that we have not been disconnected.
 		if not self.connected then
 			return "connect: server rejected CONNECT"
 		end
-		-- A minimal "40" acknowledgement has no events to dispatch. We consider
-		-- the handshake complete as soon as we received a non-error response.
 		break
 	end
 
@@ -130,8 +129,7 @@ function Client:emit(event, data)
 
 	-- Engine.IO MESSAGE (4) + Socket.IO EVENT (2) = 42
 	local payload = "42" .. vim.json.encode({ event, data })
-	local url = self:_polling_url()
-	local _, _, err = self:_http_post(url, payload)
+	local _, _, err = self:_http_post(self:_poll_path(), payload)
 	if err then
 		return "emit failed: " .. err
 	end
@@ -147,18 +145,15 @@ function Client:_poll()
 		return "not connected"
 	end
 
-	local url = self:_polling_url()
-	local body, _, err = self:_http_get(url, self.ping_interval + self.ping_timeout)
+	local body, _, err = self:_http_get(self:_poll_path(), self.ping_interval + self.ping_timeout)
 	if err then
 		return "poll failed: " .. err
 	end
 	if not body or body == "" then
-		return nil -- no data, normal for long polling
+		return nil
 	end
 
-	-- Parse the response body which may contain multiple packets
 	self:_parse_packets(body)
-
 	return nil
 end
 
@@ -168,16 +163,13 @@ end
 function Client:_parse_packets(body)
 	local pos = 1
 	while pos <= #body do
-		-- Each packet may be length-prefixed: <length>0<json> or plain: 0<json>
 		local len = body:match("^(%d+):", pos)
-		-- Only treat as length-prefixed if next char after colon is a digit (packet type)
 		if len and body:sub(pos + #len + 1, pos + #len + 1):match("^%d") then
 			local packet_len = tonumber(len)
 			local packet = body:sub(pos + #len + 1, pos + #len + packet_len)
 			self:_handle_packet(packet)
 			pos = pos + #len + 1 + packet_len
 		else
-			-- Single packet, consume rest of body
 			self:_handle_packet(body:sub(pos))
 			break
 		end
@@ -198,25 +190,22 @@ function Client:_handle_packet(packet)
 		-- Engine.IO PING, respond with PONG ("3")
 		self:_send_raw("3")
 	elseif engine_type == "4" then
-		-- Engine.IO MESSAGE
 		local socket_type = packet:sub(2, 2)
 		if socket_type == "2" then
 			-- Socket.IO EVENT: 42["event", data]
 			local json_str = packet:sub(3)
 			local ok, decoded = pcall(vim.json.decode, json_str)
 			if ok and type(decoded) == "table" and #decoded >= 1 then
-				local event = decoded[1]
-				local data = decoded[2]
-				self:_dispatch_event(event, data)
+				self:_dispatch_event(decoded[1], decoded[2])
 			end
 		elseif socket_type == "0" then
-			-- Socket.IO CONNECT response (with auth token etc), just store
+			-- Socket.IO CONNECT response
 		elseif socket_type == "1" then
 			-- Socket.IO DISCONNECT from server
 			self.connected = false
 		end
 	elseif engine_type == "3" then
-		-- Engine.IO PONG (we don't expect these, but ignore silently)
+		-- Engine.IO PONG (ignore)
 	end
 end
 
@@ -227,7 +216,6 @@ end
 function Client:_dispatch_event(event, data)
 	table.insert(self.pending_events, { event = event, data = data })
 
-	-- Wake up any waiters for this event
 	local event_waiters = self.waiters[event]
 	if event_waiters then
 		for _, callback in ipairs(event_waiters) do
@@ -253,11 +241,10 @@ function Client:wait_for(event, timeout_ms)
 		end
 	end
 
-	-- Set up a waiter and poll in a loop
 	local result_data = nil
 	local result_err = nil
 	local done = false
-	local deadline = vim.uv.now() + timeout_ms
+	local deadline = luv.now() + timeout_ms
 
 	self.waiters[event] = self.waiters[event] or {}
 	table.insert(self.waiters[event], function(data)
@@ -265,17 +252,14 @@ function Client:wait_for(event, timeout_ms)
 		done = true
 	end)
 
-	while not done and vim.uv.now() < deadline do
-		local remaining = deadline - vim.uv.now()
+	while not done and luv.now() < deadline do
+		local remaining = deadline - luv.now()
 		if remaining <= 0 then
 			break
 		end
 
-		-- Use a shorter poll timeout so we can check our deadline
 		local poll_timeout = math.min(remaining, 3000)
-
-		local url = self:_polling_url()
-		local body, _, err = self:_http_get(url, poll_timeout)
+		local body, _, err = self:_http_get(self:_poll_path(), poll_timeout)
 		if err then
 			result_err = "poll error while waiting for '" .. event .. "': " .. err
 			break
@@ -285,16 +269,13 @@ function Client:wait_for(event, timeout_ms)
 			self:_parse_packets(body)
 		end
 
-		-- Check if our callback was invoked during parse
 		if done then
 			break
 		end
 	end
 
-	-- Clean up waiter if we timed out
 	if not done and self.waiters[event] then
 		local waiters = self.waiters[event]
-		-- Remove the first callback entry (cannot reliably match by identity)
 		table.remove(waiters, 1)
 		if #waiters == 0 then
 			self.waiters[event] = nil
@@ -311,7 +292,6 @@ function Client:close()
 		return
 	end
 
-	-- Send Engine.IO MESSAGE (4) + Socket.IO DISCONNECT (1) = "41"
 	self:_send_raw("41")
 	self.connected = false
 	self.sid = nil
@@ -327,90 +307,140 @@ function Client:_send_raw(data)
 	if not self.connected then
 		return
 	end
-	local url = self:_polling_url()
-	self:_http_post(url, data)
+	self:_http_post(self:_poll_path(), data)
 end
 
----Split a raw curl --include response into headers and body
+---Perform an HTTP request using vim.uv TCP (no curl dependency)
 ---@private
----@param result string raw curl output (headers + body)
+---@param method string "GET" or "POST"
+---@param path_query string the path with query string (e.g. "/ws/?EIO=4&...")
+---@param body string? request body for POST
+---@param timeout_ms integer? timeout in milliseconds (default 5000)
+---@return string? response_body
+---@return string? response_headers
+---@return string? error
+function Client:_http_request(method, path_query, body, timeout_ms)
+	timeout_ms = timeout_ms or 5000
+
+	local tcp = luv.new_tcp()
+	local timer = luv.new_timer()
+	local done = false
+	local result_body, result_headers, result_err
+
+	-- Build raw HTTP/1.1 request
+	local lines = {
+		string.format("%s %s HTTP/1.1", method, path_query),
+		"Host: " .. self.host .. ":" .. self.port,
+		"Content-Type: text/plain;charset=UTF-8",
+		"Connection: close",
+	}
+	if self.cookies then
+		table.insert(lines, "Cookie: " .. self.cookies)
+	end
+	if body then
+		table.insert(lines, "Content-Length: " .. #body)
+	end
+	table.insert(lines, "")
+	table.insert(lines, "")
+	local raw_request = table.concat(lines, "\r\n")
+	if body then
+		raw_request = raw_request .. body
+	end
+
+	tcp:connect(self.host, self.port, function(connect_err)
+		if connect_err then
+			result_err = "connect failed: " .. connect_err
+			done = true
+			return
+		end
+
+		tcp:write(raw_request, function(write_err)
+			if write_err then
+				result_err = "write failed: " .. write_err
+				done = true
+				return
+			end
+
+			local chunks = {}
+			tcp:read_start(function(read_err, chunk)
+				if read_err then
+					result_err = "read failed: " .. read_err
+					done = true
+					return
+				end
+				if chunk then
+					table.insert(chunks, chunk)
+				else
+					-- EOF
+					local raw = table.concat(chunks)
+					result_body, result_headers = Client._split_http_response(raw)
+					done = true
+				end
+			end)
+		end)
+	end)
+
+	-- Timeout timer
+	timer:start(timeout_ms, 0, function()
+		if not done then
+			result_err = "request timed out after " .. timeout_ms .. "ms"
+			done = true
+		end
+	end)
+
+	-- Spin-wait: process event loop until done or deadline
+	local deadline = luv.now() + timeout_ms + 100
+	while not done and luv.now() < deadline do
+		luv.run("once")
+	end
+
+	-- Cleanup
+	timer:stop()
+	timer:close()
+	if not tcp:is_closing() then
+		tcp:close()
+	end
+
+	return result_body, result_headers, result_err
+end
+
+---Split a raw HTTP/1.1 response into headers and body
+---@private
+---@param raw string raw HTTP response
 ---@return string? body
 ---@return string? headers
-function Client:_split_response(result)
-	local headers_end = result:find("\r\n\r\n", 1, true)
+function Client._split_http_response(raw)
+	local headers_end = raw:find("\r\n\r\n", 1, true)
 	if not headers_end then
-		-- Try \n\n as fallback
-		headers_end = result:find("\n\n", 1, true)
+		headers_end = raw:find("\n\n", 1, true)
 		if headers_end then
-			return result:sub(headers_end + 2), result:sub(1, headers_end - 1)
+			return raw:sub(headers_end + 2), raw:sub(1, headers_end - 1)
 		end
-		-- No separator found, treat entire response as body
-		return result, nil
+		return raw, nil
 	end
-	return result:sub(headers_end + 4), result:sub(1, headers_end - 1)
+	return raw:sub(headers_end + 4), raw:sub(1, headers_end - 1)
 end
 
----Perform an HTTP GET request using curl
+---HTTP GET
 ---@private
----@param url string the URL to GET
----@param timeout_ms integer? timeout in milliseconds (default 5000)
----@return string? body response body
----@return string? headers response headers
----@return string? error error message on failure
-function Client:_http_get(url, timeout_ms)
-	timeout_ms = timeout_ms or 5000
-	local timeout_s = math.ceil(timeout_ms / 1000)
-
-	local cmd = { "curl", "--silent", "--show-error", "--max-time", tostring(timeout_s), "--include" }
-
-	if self.cookies then
-		table.insert(cmd, "--cookie")
-		table.insert(cmd, self.cookies)
-	end
-
-	table.insert(cmd, url)
-
-	local result = vim.fn.system(cmd)
-	local exit_code = vim.v.shell_error
-
-	if exit_code ~= 0 then
-		return nil, nil, "curl GET failed (exit " .. exit_code .. "): " .. (result or "")
-	end
-
-	local body, headers = self:_split_response(result)
-	return body, headers, nil
+---@param path_query string
+---@param timeout_ms integer?
+---@return string? body
+---@return string? headers
+---@return string? error
+function Client:_http_get(path_query, timeout_ms)
+	return self:_http_request("GET", path_query, nil, timeout_ms)
 end
 
----Perform an HTTP POST request using curl
+---HTTP POST
 ---@private
----@param url string the URL to POST to
----@param data string the request body
----@return string? body response body
----@return string? headers response headers
----@return string? error error message on failure
-function Client:_http_post(url, data)
-	local cmd = { "curl", "--silent", "--show-error", "--max-time", "10", "--include", "--request", "POST" }
-
-	if self.cookies then
-		table.insert(cmd, "--cookie")
-		table.insert(cmd, self.cookies)
-	end
-
-	table.insert(cmd, "--header")
-	table.insert(cmd, "Content-Type: text/plain;charset=UTF-8")
-	table.insert(cmd, "--data")
-	table.insert(cmd, data)
-	table.insert(cmd, url)
-
-	local result = vim.fn.system(cmd)
-	local exit_code = vim.v.shell_error
-
-	if exit_code ~= 0 then
-		return nil, nil, "curl POST failed (exit " .. exit_code .. "): " .. (result or "")
-	end
-
-	local body, headers = self:_split_response(result)
-	return body, headers, nil
+---@param path_query string
+---@param data string
+---@return string? body
+---@return string? headers
+---@return string? error
+function Client:_http_post(path_query, data)
+	return self:_http_request("POST", path_query, data)
 end
 
 return Client
