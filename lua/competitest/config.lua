@@ -80,6 +80,7 @@
 ---@field testcases_output_file_format string string with CompetiTest file-format modifiers representing how testcases output files should be named
 ---@field testcases_directory string where testcases files are located, relative to current file path
 ---@field companion_port integer competitive-companion port
+---@field cph_ng_port integer? cph-ng router port for code submission (default: 27121)
 ---@field receive_print_message boolean notify user that CompetiTest is ready to receive testcases, problems, contests or that they have just been received
 ---@field start_receiving_persistently_on_setup boolean start receiving testcases, problems and contests persistently, soon after calling `setup()`
 ---@field template_file false | string | table<string, string> templates used when creating source files for received problems or contests: `false` to not use templates, string with CompetiTest file-format modifiers or table associating file extension to template file path
@@ -230,6 +231,7 @@ local default_config = {
 	testcases_directory = ".",
 
 	companion_port = 27121,
+	cph_ng_port = 27121,
 	receive_print_message = true,
 	start_receiving_persistently_on_setup = false,
 	template_file = false,
