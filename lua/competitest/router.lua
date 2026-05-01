@@ -3,7 +3,6 @@ local utils = require("competitest.utils")
 local M = {}
 
 local ROUTER_REPO = "HuaLiMao-AQ/competitest.nvim"
-local ROUTER_VERSION = "v1.0.0"
 
 ---Determine the binary filename for the current platform
 ---@return string? binary_name
@@ -69,6 +68,60 @@ function M.is_installed()
 	return true
 end
 
+---Fetch the latest release tag from GitHub API
+---@return string? tag e.g. "v1.0.0"
+---@return string? error
+function M._fetch_latest_tag()
+	local api_url = string.format("https://api.github.com/repos/%s/releases/latest", ROUTER_REPO)
+
+	-- Try curl → wget → python3
+	local fetchers = {
+		{ "curl", { "curl", "-fsSL", api_url } },
+		{ "wget", { "wget", "-qO-", api_url } },
+	}
+
+	for _, f in ipairs(fetchers) do
+		if vim.fn.executable(f[1]) == 1 then
+			local result = vim.fn.system(f[2])
+			if vim.v.shell_error == 0 and result and result ~= "" then
+				local ok, data = pcall(vim.json.decode, result)
+				if ok and data and data.tag_name then
+					return data.tag_name, nil
+				end
+			end
+		end
+	end
+
+	-- Fallback: use git ls-remote to get latest tag
+	if vim.fn.executable("git") == 1 then
+		local result = vim.fn.system({ "git", "ls-remote", "--tags", "--sort=-v:refname",
+			"https://github.com/" .. ROUTER_REPO, "v*" })
+		if vim.v.shell_error == 0 and result and result ~= "" then
+			-- First line is the latest tag, format: <sha>\trefs/tags/v1.0.0
+			local tag = result:match("refs/tags/(v[%d%.]+)$")
+			if tag then
+				return tag, nil
+			end
+			-- May have ^{} suffix for annotated tags
+			tag = result:match("refs/tags/(v[%d%.]+)%^{}")
+			if tag then
+				return tag, nil
+			end
+		end
+	end
+
+	return nil, "cannot determine latest release tag"
+end
+
+---Run a shell command, return stdout
+---@param cmd string[]
+---@return string? stdout
+---@return integer exit_code
+function M._run(cmd)
+	local result = vim.fn.system(cmd)
+	return result, vim.v.shell_error
+end
+
 ---Download the binary from GitHub releases
 ---@return string? error nil on success
 function M.download()
@@ -82,39 +135,45 @@ function M.download()
 		return "cannot determine binary name"
 	end
 
+	-- Fetch latest release tag
+	local version, tag_err = M._fetch_latest_tag()
+	if not version then
+		return "failed to get latest release version: " .. (tag_err or "unknown")
+	end
+
 	local url = string.format(
 		"https://github.com/%s/releases/download/%s/%s",
-		ROUTER_REPO,
-		ROUTER_VERSION,
-		name
+		ROUTER_REPO, version, name
 	)
 
-	-- Try curl first, then wget
-	local downloaders = {
-		{ "curl", { "curl", "-fsSL", "-o", dest, url } },
-		{ "wget", { "wget", "-q", "-O", dest, url } },
-	}
-
 	local downloaded = false
-	for _, dl in ipairs(downloaders) do
-		local tool = dl[1]
-		local cmd = dl[2]
-		-- Check if tool is available
-		if vim.fn.executable(tool) == 1 then
-			local result = vim.fn.system(cmd)
-			if vim.v.shell_error == 0 then
-				downloaded = true
-				break
-			else
-				utils.notify("router download failed with " .. tool .. ": " .. (result or ""), "WARN")
-			end
+
+	-- 1. curl
+	if not downloaded and vim.fn.executable("curl") == 1 then
+		local _, code = M._run({ "curl", "-fsSL", "-o", dest, url })
+		if code == 0 then downloaded = true end
+	end
+
+	-- 2. wget
+	if not downloaded and vim.fn.executable("wget") == 1 then
+		local _, code = M._run({ "wget", "-q", "-O", dest, url })
+		if code == 0 then downloaded = true end
+	end
+
+	-- 3. python3 / python
+	for _, py in ipairs({ "python3", "python" }) do
+		if not downloaded and vim.fn.executable(py) == 1 then
+			local _, code = M._run({
+				py, "-c",
+				string.format("import urllib.request; urllib.request.urlretrieve(%q, %q)", url, dest),
+			})
+			if code == 0 then downloaded = true end
 		end
 	end
 
 	if not downloaded then
-		return "neither curl nor wget available. Install one or download the router binary manually from:\n"
-			.. url
-			.. "\nand place it at: " .. dest
+		return "no download tool available (curl/wget/python3).\n"
+			.. "Download manually from: " .. url .. "\nplace at: " .. dest
 	end
 
 	-- Make executable on Unix
