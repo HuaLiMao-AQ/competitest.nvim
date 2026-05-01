@@ -85,6 +85,37 @@ function Client:connect()
 	self.ping_timeout = data.pingTimeout or 20000
 	self.connected = true
 
+	-- Send Socket.IO CONNECT packet (Engine.IO MESSAGE "4" + Socket.IO CONNECT "0")
+	self:_send_raw("40")
+
+	-- Wait for the server's CONNECT acknowledgement ("40" or "40{...}")
+	local deadline = vim.uv.now() + 5000
+	while vim.uv.now() < deadline do
+		local remaining = deadline - vim.uv.now()
+		if remaining <= 0 then
+			break
+		end
+		local poll_timeout = math.min(remaining, 1000)
+		local poll_url = self:_polling_url()
+		local poll_body, _, poll_err = self:_http_get(poll_url, poll_timeout)
+		if poll_err then
+			self.connected = false
+			return "connect: failed waiting for CONNECT acknowledgement: " .. poll_err
+		end
+		if poll_body and poll_body ~= "" then
+			self:_parse_packets(poll_body)
+		end
+		-- A successful CONNECT response from the server starts with "40"
+		-- (Engine.IO MESSAGE + Socket.IO CONNECT). Once received we are fully connected.
+		-- The _handle_packet already stores it; check that we have not been disconnected.
+		if not self.connected then
+			return "connect: server rejected CONNECT"
+		end
+		-- A minimal "40" acknowledgement has no events to dispatch. We consider
+		-- the handshake complete as soon as we received a non-error response.
+		break
+	end
+
 	return nil
 end
 
@@ -300,6 +331,25 @@ function Client:_send_raw(data)
 	self:_http_post(url, data)
 end
 
+---Split a raw curl --include response into headers and body
+---@private
+---@param result string raw curl output (headers + body)
+---@return string? body
+---@return string? headers
+function Client:_split_response(result)
+	local headers_end = result:find("\r\n\r\n", 1, true)
+	if not headers_end then
+		-- Try \n\n as fallback
+		headers_end = result:find("\n\n", 1, true)
+		if headers_end then
+			return result:sub(headers_end + 2), result:sub(1, headers_end - 1)
+		end
+		-- No separator found, treat entire response as body
+		return result, nil
+	end
+	return result:sub(headers_end + 4), result:sub(1, headers_end - 1)
+end
+
 ---Perform an HTTP GET request using curl
 ---@private
 ---@param url string the URL to GET
@@ -327,22 +377,7 @@ function Client:_http_get(url, timeout_ms)
 		return nil, nil, "curl GET failed (exit " .. exit_code .. "): " .. (result or "")
 	end
 
-	-- Split headers and body (separated by \r\n\r\n)
-	local headers_end = result:find("\r\n\r\n", 1, true)
-	if not headers_end then
-		-- Try \n\n as fallback
-		headers_end = result:find("\n\n", 1, true)
-		if headers_end then
-			local headers = result:sub(1, headers_end - 1)
-			local body = result:sub(headers_end + 2)
-			return body, headers, nil
-		end
-		-- No separator found, treat entire response as body
-		return result, nil, nil
-	end
-
-	local headers = result:sub(1, headers_end - 1)
-	local body = result:sub(headers_end + 4)
+	local body, headers = self:_split_response(result)
 	return body, headers, nil
 end
 
@@ -374,20 +409,7 @@ function Client:_http_post(url, data)
 		return nil, nil, "curl POST failed (exit " .. exit_code .. "): " .. (result or "")
 	end
 
-	-- Split headers and body
-	local headers_end = result:find("\r\n\r\n", 1, true)
-	if not headers_end then
-		headers_end = result:find("\n\n", 1, true)
-		if headers_end then
-			local headers = result:sub(1, headers_end - 1)
-			local body = result:sub(headers_end + 2)
-			return body, headers, nil
-		end
-		return result, nil, nil
-	end
-
-	local headers = result:sub(1, headers_end - 1)
-	local body = result:sub(headers_end + 4)
+	local body, headers = self:_split_response(result)
 	return body, headers, nil
 end
 
