@@ -3,7 +3,7 @@ name: Build Router Binary
 on:
   push:
     branches: [master]
-    paths: ["router/**"]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -45,6 +45,7 @@ jobs:
         run: |
           cd router
           go build -ldflags="-s -w" -o competitest-router-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }} .
+          chmod +x competitest-router-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -60,9 +61,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
+
+      - name: Ensure execute permissions
+        run: chmod +x artifacts/competitest-router-linux-* artifacts/competitest-router-darwin-*
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: artifacts/competitest-router-*
           generate_release_notes: true

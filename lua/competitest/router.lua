@@ -48,11 +48,25 @@ function M._binary_path()
 	return data_dir .. "/" .. name
 end
 
----Check if the binary exists locally
+---Check if the binary exists locally and is executable
 ---@return boolean
 function M.is_installed()
 	local path = M._binary_path()
-	return path ~= nil and utils.does_file_exist(path)
+	if not path or not utils.does_file_exist(path) then
+		return false
+	end
+	-- On Unix, verify execute permission
+	if luv.os_uname().sysname ~= "Windows_NT" then
+		local stat = luv.fs_stat(path)
+		if stat then
+			local mode = stat.mode % 512 -- extract permission bits (lower 9 bits)
+			-- Check owner execute bit (0100 = 64)
+			if mode % 128 < 64 then
+				return false
+			end
+		end
+	end
+	return true
 end
 
 ---Download the binary from GitHub releases
@@ -143,6 +157,11 @@ function M.start(port)
 
 	if not router_path or not utils.does_file_exist(router_path) then
 		return "router binary not found at: " .. tostring(router_path)
+	end
+
+	-- Ensure execute permission before spawning
+	if luv.os_uname().sysname ~= "Windows_NT" then
+		luv.fs_chmod(router_path, 493) -- 0755
 	end
 
 	local handle, pid = luv.spawn(router_path, {
