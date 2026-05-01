@@ -86,7 +86,7 @@ To see all the available settings see [configuration](#configuration).
 - To store testcases in multiple text files set `testcases_use_single_file` to false
 - Files naming shall follow a rule to be recognized. Let's say your file is called `task-A.cpp`. If using the default configuration testcases associated with that file will be named `task-A_input0.txt`, `task-A_output0.txt`, `task-A_input1.txt`, `task-A_output1.txt` and so on. The counting starts from 0
 - Of course files naming can be configured: see `testcases_input_file_format` and `testcases_output_file_format` in [configuration](#configuration)
-- Testcases files can be put in the same folder of the source code file, but you can customize their path (see `testcases_directory` in [configuration](#configuration))
+- Testcases files can be put in the same folder of the source code file, but you can customize their path (see `testcases_directory` in [configuration](#configuration)). `testcases_directory` also supports [file-format modifiers](#file-format-modifiers), for example `"testcases/$(FNOEXT)"` stores testcases in a `testcases/` subdirectory with a per-problem subdirectory named after the source file
 
 #### Storing testcases in a single file
 - To store testcases in a single file set `testcases_use_single_file` to true
@@ -410,7 +410,7 @@ require('competitest').setup {
 		}
 		```
 - `view_output_diff`: view diff between actual output and expected output in their respective windows
-- `testcases_directory`: where testcases files are located, relatively to current file's path
+- `testcases_directory`: where testcases files are located, relatively to current file's path. Supports [file-format modifiers](#file-format-modifiers), for example `"testcases/$(FNOEXT)"` stores testcases in a `testcases/` subdirectory with a per-problem subdirectory named after the source file
 - `testcases_use_single_file`: if true testcases will be stored in a single file instead of using multiple text files. If you want to change the way already existing testcases are stored see [conversion](#convert-testcases)
 - `testcases_auto_detect_storage`: if true testcases storage method will be detected automatically. When both text files and single file are available, testcases will be loaded according to the preference specified in `testcases_use_single_file`
 - `testcases_single_file_format`: string representing how single testcases files should be named (see [file-format modifiers](#file-format-modifiers))
@@ -479,7 +479,7 @@ return {
 Modifiers are substrings that will be replaced by another string, depending on the modifier and the context. They're used to tweak some options.
 
 #### File-format modifiers
-You can use them to [define commands](#customize-compile-and-run-commands) or to customize testcases files naming through options `testcases_single_file_format`, `testcases_input_file_format` and `testcases_output_file_format`.
+You can use them to [define commands](#customize-compile-and-run-commands) or to customize testcases files naming through options `testcases_single_file_format`, `testcases_input_file_format`, `testcases_output_file_format` and `testcases_directory`.
 
 | Modifier      | Meaning                                    |
 | --------      | -------                                    |

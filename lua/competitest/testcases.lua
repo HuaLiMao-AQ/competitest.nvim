@@ -207,7 +207,12 @@ end
 ---@return string # absolute path of testcases directory
 local function buf_get_testcases_path(bufnr)
 	return vim.api.nvim_buf_call(bufnr, function()
-		return vim.fn.expand("%:p:h") .. "/" .. gbc(bufnr).testcases_directory .. "/"
+		local filepath = vim.api.nvim_buf_get_name(bufnr)
+		local evaluated_dir = utils.eval_string(filepath, gbc(bufnr).testcases_directory)
+		if not evaluated_dir then
+			evaluated_dir = gbc(bufnr).testcases_directory
+		end
+		return vim.fn.fnamemodify(filepath, ":p:h") .. "/" .. evaluated_dir .. "/"
 	end)
 end
 
