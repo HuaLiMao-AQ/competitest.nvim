@@ -77,10 +77,10 @@ function M.submit(opts)
 
 	-- Wait for the server's acknowledgement
 	-- cph-ng may respond with either "submitDone" or "submitResult"
-	local data, wait_err = client:wait_for("submitDone", 30000)
+	local data, wait_err = client:wait_for("submitDone", 15000)
 	if wait_err then
 		-- Try alternate event name
-		data, wait_err = client:wait_for("submitResult", 30000)
+		data, wait_err = client:wait_for("submitResult", 15000)
 		if wait_err then
 			client:close()
 			return false, "timed out waiting for submission response: " .. wait_err
@@ -119,7 +119,7 @@ function M.submit_current_buffer()
 	local success, err = M.submit({
 		url = url,
 		source_code = source_code,
-		port = bufcfg.companion_port,
+		port = bufcfg.cph_ng_port,
 	})
 
 	if success then
